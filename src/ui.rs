@@ -10,25 +10,22 @@ use crate::app::App;
 pub fn draw_ui(frame: &mut Frame, app: &App) -> Rect {
     let area = frame.area();
 
-    // Main vertical split: header, image, footer
+    // Vertical split: image area + status bar at the bottom
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // header bar
             Constraint::Min(10),   // image area
-            Constraint::Length(1), // footer bar
+            Constraint::Length(1), // status bar
         ])
         .split(area);
 
-    draw_header(frame, app, chunks[0]);
-    let image_area = chunks[1];
-    draw_footer(frame, app, chunks[2]);
+    draw_status_bar(frame, app, chunks[1]);
 
-    image_area
+    chunks[0]
 }
 
-fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
-    let header_text = Line::from(vec![
+fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let mut spans = vec![
         Span::styled(
             format!("  {}  ", app.dataset.name),
             Style::default()
@@ -36,7 +33,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(
-            "Frame {}/{} | Tracks: {} | Annotation: {} | Contrast [{:.3}, {:.3}]",
+            "Frame {}/{} | Tracks: {} | {} | Contrast [{:.3}, {:.3}]",
             app.frame_idx + 1,
             app.num_frames,
             app.dataset.tracks.len(),
@@ -44,14 +41,8 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
             app.low,
             app.high,
         )),
-    ]);
-    let header = Paragraph::new(header_text);
-    frame.render_widget(header, area);
-}
-
-fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
-    let mut spans = vec![
-        Span::raw("  [←/→] or [J/K] Navigate"),
+        Span::raw("  |  "),
+        Span::raw("[\u{2190}/\u{2192}] or [J/K] Navigate"),
         Span::raw("  |  "),
         Span::raw("[Q] Quit  "),
     ];
@@ -64,8 +55,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    let footer = Paragraph::new(Line::from(spans)).style(Style::default().fg(Color::Gray));
-    frame.render_widget(footer, area);
+    let status = Paragraph::new(Line::from(spans)).style(Style::default().fg(Color::Gray));
+    frame.render_widget(status, area);
 }
 
 fn annotation_type(dataset: &crate::ctc::Dataset) -> &'static str {

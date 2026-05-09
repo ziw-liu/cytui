@@ -38,6 +38,9 @@ struct Cli {
     /// Upper quantile for contrast clipping [0.0, 1.0]
     #[arg(long, default_value_t = 0.999, value_name = "Q")]
     high: f64,
+    /// Number of tail segments to draw for tracking history
+    #[arg(long, default_value_t = 3, value_name = "N")]
+    tail_length: usize,
 }
 
 fn main() -> Result<()> {
@@ -61,13 +64,22 @@ fn main() -> Result<()> {
         let (img_path, lbl_path) = dataset
             .frame_paths(0)
             .expect("dataset should have at least one frame");
-        let composed = overlay::compose_frame(img_path, lbl_path, cli.low, cli.high)?;
+        let composed = overlay::compose_frame(
+            img_path,
+            lbl_path,
+            0,
+            &dataset.tracks,
+            &[],
+            cli.low,
+            cli.high,
+            cli.tail_length,
+        )?;
         composed.save(&out_path)?;
         println!("Saved composed frame to {}", out_path.display());
         return Ok(());
     }
 
-    let mut app = App::new(dataset, cli.low, cli.high)?;
+    let mut app = App::new(dataset, cli.low, cli.high, cli.tail_length)?;
 
     // Setup terminal
     crossterm::terminal::enable_raw_mode()?;

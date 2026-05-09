@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::Result;
@@ -7,6 +7,8 @@ use imageproc::contours::find_contours;
 use ndarray::Array1;
 use ndarray_stats::{interpolate::Nearest, Quantile1dExt};
 use noisy_float::types::n64;
+
+use crate::ctc::Track;
 
 /// Convert track_id into a distinct, deterministic color.
 pub fn color_for_id(id: u32) -> Rgb<u8> {
@@ -149,15 +151,123 @@ fn draw_line_safe(
     }
 }
 
-/// Compose the final overlay image for a single frame.
+/// Compute centroid (x, y) for each unique non-zero label in the mask.
+pub fn compute_centroids(
+    labels: &[u16],
+    width: u32,
+    _height: u32,
+) -> HashMap<u32, (f64, f64)> {
+    let mut sums: HashMap<u32, (f64, f64, u64)> = HashMap::new();
+    for (idx, &val) in labels.iter().enumerate() {
+        if val == 0 {
+            continue;
+        }
+        let x = (idx % width as usize) as f64;
+        let y = (idx / width as usize) as f64;
+        let entry = sums.entry(val as u32).or_insert((0.0, 0.0, 0));
+        entry.0 += x;
+        entry.1 += y;
+        entry.2 += 1;
+    }
+    sums.into_iter()
+        .map(|(id, (sx, sy, n))| (id, (sx / n as f64, sy / n as f64)))
+        .collect()
+}
+
+/// Overlay tracking graph: connected chain of line segments per cell.
+///
+/// - `frame_idx`: current frame index.
+/// - `tracks`: all track definitions (CTC man_track.txt / res_track.txt).
+/// - `centroids`: per-frame map from track_id to centroid (x, y).
+/// - `tail_length`: maximum number of segments in the tail (0 disables tails).
+pub fn overlay_tracking(
+    base: &mut RgbImage,
+    frame_idx: u32,
+    tracks: &HashMap<u32, Track>,
+    centroids: &[HashMap<u32, (f64, f64)>],
+    tail_length: usize,
+) {
+    let current_centroids = match centroids.get(frame_idx as usize) {
+        Some(c) => c,
+        None => return,
+    };
+
+    let max_points = if tail_length == 0 {
+        1
+    } else {
+        tail_length + 1
+    };
+
+    for (&track_id, &current_centroid) in current_centroids {
+        let track = match tracks.get(&track_id) {
+            Some(t) => t,
+            None => continue,
+        };
+
+        // Collect the cell's own centroids walking backwards, up to max_points.
+        let mut points: Vec<((f64, f64), bool)> = Vec::with_capacity(max_points);
+        points.push((current_centroid, false));
+
+        let mut prev_frame = frame_idx as i32 - 1;
+        while prev_frame >= track.start_frame as i32 {
+            if let Some(cmap) = centroids.get(prev_frame as usize) {
+                if let Some(&centroid) = cmap.get(&track_id) {
+                    points.push((centroid, false));
+                    if points.len() == max_points {
+                        break;
+                    }
+                }
+            }
+            prev_frame -= 1;
+        }
+
+        // If we still have room and there's a parent, add parent link.
+        let has_parent_link = if points.len() < max_points && track.parent_id > 0 && track.start_frame > 0 {
+            let parent_frame = track.start_frame - 1;
+            if (parent_frame as usize) < centroids.len() {
+                if let Some(parent_centroid) = centroids[parent_frame as usize].get(&track.parent_id) {
+                    points.push((*parent_centroid, true));
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        // points are newest -> oldest; reverse to draw oldest -> newest.
+        points.reverse();
+
+        let color = color_for_id(track_id);
+        for i in 0..points.len().saturating_sub(1) {
+            let (x0, y0) = points[i].0;
+            let (x1, y1) = points[i + 1].0;
+            let segment_color = if has_parent_link && i == 0 {
+                Rgb([255u8, 255, 255])
+            } else {
+                color
+            };
+            draw_line_safe(base, x0 as u32, y0 as u32, x1 as u32, y1 as u32, segment_color);
+        }
+    }
+}
+
 pub fn compose_frame(
     image_path: &Path,
     label_path: &Path,
+    frame_idx: u32,
+    tracks: &HashMap<u32, Track>,
+    centroids: &[HashMap<u32, (f64, f64)>],
     low_q: f64,
     high_q: f64,
+    tail_length: usize,
 ) -> Result<RgbImage> {
     let mut base = load_image(image_path, low_q, high_q)?;
     let (labels, w, h) = load_labels(label_path)?;
     overlay_contours(&mut base, &labels, w, h);
+    overlay_tracking(&mut base, frame_idx, tracks, centroids, tail_length);
     Ok(base)
 }
