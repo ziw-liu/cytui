@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
-use viuer::Config as ViuerConfig;
+use ratatui::backend::CrosstermBackend;
+use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
 
 mod app;
 mod ctc;
@@ -79,8 +79,6 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut app = App::new(dataset, cli.low, cli.high, cli.tail_length)?;
-
     // Setup terminal
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -89,10 +87,14 @@ fn main() -> Result<()> {
         crossterm::terminal::EnterAlternateScreen,
         crossterm::event::EnableMouseCapture
     )?;
+    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let res = run_app(&mut terminal, &mut app);
+    let res = (|| {
+        let mut app = App::new(dataset, picker, cli.low, cli.high, cli.tail_length)?;
+        run_app(&mut terminal, &mut app)
+    })();
 
     // Restore terminal
     crossterm::terminal::disable_raw_mode()?;
@@ -106,56 +108,49 @@ fn main() -> Result<()> {
     res
 }
 
-fn run_app<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-    app: &mut App,
-) -> Result<()> {
+fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
+where
+    B::Error: std::error::Error + Send + Sync + 'static,
+{
     loop {
-        let mut viuer_err: Option<String> = None;
-
-        // Draw UI and capture image area
         terminal.draw(|frame| {
             let image_area = ui::draw_ui(frame, app);
 
-            // Render image via viuer within the allocated block
-            if let Some(ref img) = app.current_image {
-                let dyn_img = image::DynamicImage::ImageRgb8(img.clone());
-                let conf = ViuerConfig {
-                    x: image_area.x as u16,
-                    y: image_area.y as i16,
-                    width: Some(image_area.width as u32),
-                    height: Some(image_area.height as u32),
-                    ..Default::default()
-                };
-                if let Err(e) = viuer::print(&dyn_img, &conf) {
-                    viuer_err = Some(format!("viuer: {e}"));
-                }
+            if let Some(image_state) = app.image_state.as_mut() {
+                let image =
+                    StatefulImage::<StatefulProtocol>::default().resize(Resize::Scale(None));
+                frame.render_stateful_widget(image, image_area, image_state);
             }
         })?;
 
-        app.render_error = viuer_err;
+        if let Some(image_state) = app.image_state.as_mut()
+            && let Some(result) = image_state.last_encoding_result()
+        {
+            app.render_error = result.err().map(|err| format!("ratatui-image: {err}"));
+        }
 
         // Handle events
         if event::poll(std::time::Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
-                && key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') => break,
-                        KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('L') => {
-                            app.next_frame()?;
-                        }
-                        KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('H') => {
-                            app.prev_frame()?;
-                        }
-                        KeyCode::Char('j') | KeyCode::Char('J') => {
-                            app.next_frame()?;
-                        }
-                        KeyCode::Char('k') | KeyCode::Char('K') => {
-                            app.prev_frame()?;
-                        }
-                        _ => {}
-                    }
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Char('Q') => break,
+                KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('L') => {
+                    app.next_frame()?;
                 }
+                KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('H') => {
+                    app.prev_frame()?;
+                }
+                KeyCode::Char('j') | KeyCode::Char('J') => {
+                    app.next_frame()?;
+                }
+                KeyCode::Char('k') | KeyCode::Char('K') => {
+                    app.prev_frame()?;
+                }
+                _ => {}
+            }
+        }
     }
 
     Ok(())

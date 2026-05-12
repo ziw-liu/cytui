@@ -5,7 +5,7 @@ use anyhow::Result;
 use image::{GrayImage, ImageBuffer, Luma, Rgb, RgbImage};
 use imageproc::contours::find_contours;
 use ndarray::Array1;
-use ndarray_stats::{interpolate::Nearest, Quantile1dExt};
+use ndarray_stats::{Quantile1dExt, interpolate::Nearest};
 use noisy_float::types::n64;
 
 use crate::ctc::Track;
@@ -70,12 +70,7 @@ pub fn load_labels(path: &Path) -> Result<(Vec<u16>, u32, u32)> {
 }
 
 /// Overlay colored contours for each unique label onto the base image.
-pub fn overlay_contours(
-    base: &mut RgbImage,
-    labels: &[u16],
-    width: u32,
-    height: u32,
-) {
+pub fn overlay_contours(base: &mut RgbImage, labels: &[u16], width: u32, height: u32) {
     // Collect unique non-zero labels
     let mut unique = HashSet::new();
     for &v in labels {
@@ -114,14 +109,7 @@ pub fn overlay_contours(
     }
 }
 
-fn draw_line_safe(
-    img: &mut RgbImage,
-    x0: u32,
-    y0: u32,
-    x1: u32,
-    y1: u32,
-    color: Rgb<u8>,
-) {
+fn draw_line_safe(img: &mut RgbImage, x0: u32, y0: u32, x1: u32, y1: u32, color: Rgb<u8>) {
     // Bresenham-ish line drawing with bounds checking
     let (w, h) = img.dimensions();
     let dx = (x1 as i32 - x0 as i32).abs();
@@ -152,11 +140,7 @@ fn draw_line_safe(
 }
 
 /// Compute centroid (x, y) for each unique non-zero label in the mask.
-pub fn compute_centroids(
-    labels: &[u16],
-    width: u32,
-    _height: u32,
-) -> HashMap<u32, (f64, f64)> {
+pub fn compute_centroids(labels: &[u16], width: u32, _height: u32) -> HashMap<u32, (f64, f64)> {
     let mut sums: HashMap<u32, (f64, f64, u64)> = HashMap::new();
     for (idx, &val) in labels.iter().enumerate() {
         if val == 0 {
@@ -192,11 +176,7 @@ pub fn overlay_tracking(
         None => return,
     };
 
-    let max_points = if tail_length == 0 {
-        1
-    } else {
-        tail_length + 1
-    };
+    let max_points = if tail_length == 0 { 1 } else { tail_length + 1 };
 
     for (&track_id, &current_centroid) in current_centroids {
         let track = match tracks.get(&track_id) {
@@ -222,21 +202,24 @@ pub fn overlay_tracking(
         }
 
         // If we still have room and there's a parent, add parent link.
-        let has_parent_link = if points.len() < max_points && track.parent_id > 0 && track.start_frame > 0 {
-            let parent_frame = track.start_frame - 1;
-            if (parent_frame as usize) < centroids.len() {
-                if let Some(parent_centroid) = centroids[parent_frame as usize].get(&track.parent_id) {
-                    points.push((*parent_centroid, true));
-                    true
+        let has_parent_link =
+            if points.len() < max_points && track.parent_id > 0 && track.start_frame > 0 {
+                let parent_frame = track.start_frame - 1;
+                if (parent_frame as usize) < centroids.len() {
+                    if let Some(parent_centroid) =
+                        centroids[parent_frame as usize].get(&track.parent_id)
+                    {
+                        points.push((*parent_centroid, true));
+                        true
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 }
             } else {
                 false
-            }
-        } else {
-            false
-        };
+            };
 
         // points are newest -> oldest; reverse to draw oldest -> newest.
         points.reverse();
@@ -250,7 +233,14 @@ pub fn overlay_tracking(
             } else {
                 color
             };
-            draw_line_safe(base, x0 as u32, y0 as u32, x1 as u32, y1 as u32, segment_color);
+            draw_line_safe(
+                base,
+                x0 as u32,
+                y0 as u32,
+                x1 as u32,
+                y1 as u32,
+                segment_color,
+            );
         }
     }
 }

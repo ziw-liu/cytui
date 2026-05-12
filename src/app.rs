@@ -1,16 +1,18 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use image::RgbImage;
+use image::DynamicImage;
+use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 
 use crate::ctc::Dataset;
 use crate::overlay::{compose_frame, compute_centroids, load_labels};
 
 pub struct App {
     pub dataset: Dataset,
+    pub picker: Picker,
     pub frame_idx: usize,
     pub num_frames: usize,
-    pub current_image: Option<RgbImage>,
+    pub image_state: Option<StatefulProtocol>,
     pub low: f64,
     pub high: f64,
     pub tail_length: usize,
@@ -20,7 +22,13 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(dataset: Dataset, low: f64, high: f64, tail_length: usize) -> Result<Self> {
+    pub fn new(
+        dataset: Dataset,
+        picker: Picker,
+        low: f64,
+        high: f64,
+        tail_length: usize,
+    ) -> Result<Self> {
         let num_frames = dataset.num_frames();
         if num_frames == 0 {
             anyhow::bail!("No frames found in dataset");
@@ -39,9 +47,10 @@ impl App {
 
         let mut app = App {
             dataset,
+            picker,
             frame_idx: 0,
             num_frames,
-            current_image: None,
+            image_state: None,
             low,
             high,
             tail_length,
@@ -70,7 +79,7 @@ impl App {
 
     fn load_frame(&mut self) -> Result<()> {
         if let Some((img_path, lbl_path)) = self.dataset.frame_paths(self.frame_idx) {
-            self.current_image = Some(compose_frame(
+            let image = compose_frame(
                 img_path,
                 lbl_path,
                 self.frame_idx as u32,
@@ -79,7 +88,11 @@ impl App {
                 self.low,
                 self.high,
                 self.tail_length,
-            )?);
+            )?;
+            self.image_state = Some(
+                self.picker
+                    .new_resize_protocol(DynamicImage::ImageRgb8(image)),
+            );
         }
         Ok(())
     }

@@ -6,11 +6,11 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-crossterm = "0.28"
+crossterm = "0.29"
 image = "0.25"
 imageproc = "0.25"
-ratatui = "0.29"
-viuer = { version = "0.11", features = ["icy_sixel"] }
+ratatui = "0.30"
+ratatui-image = { version = "11.0.2", default-features = false, features = ["crossterm", "image-defaults"] }
 ndarray = "0.17"
 ndarray-stats = "0.7"
 noisy_float = "0.2"
