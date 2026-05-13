@@ -61,20 +61,22 @@ impl App {
         Ok(app)
     }
 
-    pub fn next_frame(&mut self) -> Result<()> {
+    pub fn next_frame(&mut self) -> Result<bool> {
         if self.frame_idx + 1 < self.num_frames {
             self.frame_idx += 1;
             self.load_frame()?;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
-    pub fn prev_frame(&mut self) -> Result<()> {
+    pub fn prev_frame(&mut self) -> Result<bool> {
         if self.frame_idx > 0 {
             self.frame_idx -= 1;
             self.load_frame()?;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
     fn load_frame(&mut self) -> Result<()> {

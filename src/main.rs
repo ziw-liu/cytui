@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::{Frame, Terminal};
 use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
 
 mod app;
@@ -82,11 +82,7 @@ fn main() -> Result<()> {
     // Setup terminal
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
-    crossterm::execute!(
-        &mut stdout,
-        crossterm::terminal::EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
-    )?;
+    crossterm::execute!(&mut stdout, crossterm::terminal::EnterAlternateScreen)?;
     let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -100,8 +96,7 @@ fn main() -> Result<()> {
     crossterm::terminal::disable_raw_mode()?;
     crossterm::execute!(
         terminal.backend_mut(),
-        crossterm::terminal::LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture
+        crossterm::terminal::LeaveAlternateScreen
     )?;
     terminal.show_cursor()?;
 
@@ -112,46 +107,64 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
 where
     B::Error: std::error::Error + Send + Sync + 'static,
 {
+    draw_app(terminal, app)?;
+
     loop {
-        terminal.draw(|frame| {
-            let image_area = ui::draw_ui(frame, app);
-
-            if let Some(image_state) = app.image_state.as_mut() {
-                let image =
-                    StatefulImage::<StatefulProtocol>::default().resize(Resize::Scale(None));
-                frame.render_stateful_widget(image, image_area, image_state);
-            }
-        })?;
-
-        if let Some(image_state) = app.image_state.as_mut()
-            && let Some(result) = image_state.last_encoding_result()
-        {
-            app.render_error = result.err().map(|err| format!("ratatui-image: {err}"));
-        }
-
-        // Handle events
-        if event::poll(std::time::Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            match key.code {
+        let should_redraw = match event::read()? {
+            Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                 KeyCode::Char('q') | KeyCode::Char('Q') => break,
-                KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('L') => {
-                    app.next_frame()?;
-                }
-                KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('H') => {
-                    app.prev_frame()?;
-                }
-                KeyCode::Char('j') | KeyCode::Char('J') => {
-                    app.next_frame()?;
-                }
-                KeyCode::Char('k') | KeyCode::Char('K') => {
-                    app.prev_frame()?;
-                }
-                _ => {}
+                KeyCode::Right
+                | KeyCode::Char('l')
+                | KeyCode::Char('L')
+                | KeyCode::Char('j')
+                | KeyCode::Char('J') => app.next_frame()?,
+                KeyCode::Left
+                | KeyCode::Char('h')
+                | KeyCode::Char('H')
+                | KeyCode::Char('k')
+                | KeyCode::Char('K') => app.prev_frame()?,
+                _ => false,
+            },
+            Event::Resize(_, _) => true,
+            _ => false,
+        };
+
+        if should_redraw {
+            draw_app(terminal, app)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn draw_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
+where
+    B::Error: std::error::Error + Send + Sync + 'static,
+{
+    let previous_render_error = app.render_error.clone();
+
+    terminal.draw(|frame| draw_frame(frame, app))?;
+
+    if let Some(image_state) = app.image_state.as_mut()
+        && let Some(result) = image_state.last_encoding_result()
+    {
+        app.render_error = result.err().map(|err| format!("ratatui-image: {err}"));
+        if app.render_error != previous_render_error {
+            terminal.draw(|frame| draw_frame(frame, app))?;
+            if let Some(image_state) = app.image_state.as_mut() {
+                let _ = image_state.last_encoding_result();
             }
         }
     }
 
     Ok(())
+}
+
+fn draw_frame(frame: &mut Frame, app: &mut App) {
+    let image_area = ui::draw_ui(frame, app);
+
+    if let Some(image_state) = app.image_state.as_mut() {
+        let image = StatefulImage::<StatefulProtocol>::default().resize(Resize::Scale(None));
+        frame.render_stateful_widget(image, image_area, image_state);
+    }
 }
