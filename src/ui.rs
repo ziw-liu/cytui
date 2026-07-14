@@ -60,7 +60,9 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn annotation_type(dataset: &crate::ctc::Dataset) -> &'static str {
-    if dataset
+    if dataset.label_paths.is_empty() {
+        "Images"
+    } else if dataset
         .label_paths
         .first()
         .and_then(|p| p.file_name())

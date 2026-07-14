@@ -37,7 +37,7 @@ impl App {
         // Pre-compute centroids for all frames.
         let mut centroids = Vec::with_capacity(num_frames);
         for idx in 0..num_frames {
-            if let Some((_img_path, lbl_path)) = dataset.frame_paths(idx) {
+            if let Some((_, Some(lbl_path))) = dataset.frame_sources(idx) {
                 let (labels, w, h) = load_labels(lbl_path)?;
                 centroids.push(compute_centroids(&labels, w, h));
             } else {
@@ -80,7 +80,7 @@ impl App {
     }
 
     fn load_frame(&mut self) -> Result<()> {
-        if let Some((img_path, lbl_path)) = self.dataset.frame_paths(self.frame_idx) {
+        if let Some((img_path, lbl_path)) = self.dataset.frame_sources(self.frame_idx) {
             let image = compose_frame(
                 img_path,
                 lbl_path,

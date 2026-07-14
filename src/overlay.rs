@@ -246,8 +246,8 @@ pub fn overlay_tracking(
 }
 
 pub fn compose_frame(
-    image_path: &Path,
-    label_path: &Path,
+    image_path: Option<&Path>,
+    label_path: Option<&Path>,
     frame_idx: u32,
     tracks: &HashMap<u32, Track>,
     centroids: &[HashMap<u32, (f64, f64)>],
@@ -255,9 +255,19 @@ pub fn compose_frame(
     high_q: f64,
     tail_length: usize,
 ) -> Result<RgbImage> {
-    let mut base = load_image(image_path, low_q, high_q)?;
-    let (labels, w, h) = load_labels(label_path)?;
-    overlay_contours(&mut base, &labels, w, h);
+    let label_data = label_path.map(load_labels).transpose()?;
+    let mut base = match image_path {
+        Some(image_path) => load_image(image_path, low_q, high_q)?,
+        None => {
+            let (_, w, h) = label_data
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("frame has neither an image nor a label mask"))?;
+            RgbImage::new(*w, *h)
+        }
+    };
+    if let Some((labels, w, h)) = label_data {
+        overlay_contours(&mut base, &labels, w, h);
+    }
     overlay_tracking(&mut base, frame_idx, tracks, centroids, tail_length);
     Ok(base)
 }

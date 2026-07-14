@@ -2,7 +2,7 @@ use std::io;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::backend::CrosstermBackend;
 use ratatui::{Frame, Terminal};
@@ -18,14 +18,20 @@ use app::App;
 #[derive(Parser, Debug)]
 #[command(name = "cytui")]
 #[command(about = "CTC Dataset TUI Viewer")]
+#[command(group(
+    ArgGroup::new("input")
+        .required(true)
+        .multiple(true)
+        .args(["images", "tracks"])
+))]
 struct Cli {
     /// Path to the image sequence directory (e.g. train/01)
     #[arg(short, long, value_name = "DIR")]
-    images: PathBuf,
+    images: Option<PathBuf>,
 
     /// Path to the annotation directory (e.g. train/01_GT/TRA or a RES folder)
     #[arg(short, long, value_name = "DIR")]
-    tracks: PathBuf,
+    tracks: Option<PathBuf>,
 
     /// Dump the composed first frame to a PNG file and exit (for testing)
     #[arg(long, value_name = "FILE")]
@@ -54,7 +60,7 @@ fn main() -> Result<()> {
     }
 
     // Load dataset
-    let dataset = ctc::Dataset::load(&cli.images, &cli.tracks)?;
+    let dataset = ctc::Dataset::load(cli.images.as_deref(), cli.tracks.as_deref())?;
     if !dataset.is_valid() {
         anyhow::bail!("Dataset is empty or invalid");
     }
@@ -62,7 +68,7 @@ fn main() -> Result<()> {
     // If --dump-png is provided, render the first frame and exit
     if let Some(out_path) = cli.dump_png {
         let (img_path, lbl_path) = dataset
-            .frame_paths(0)
+            .frame_sources(0)
             .expect("dataset should have at least one frame");
         let composed = overlay::compose_frame(
             img_path,
@@ -101,6 +107,38 @@ fn main() -> Result<()> {
     terminal.show_cursor()?;
 
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_accepts_images_only() {
+        let cli = Cli::try_parse_from(["cytui", "--images", "images"]).unwrap();
+        assert!(cli.images.is_some());
+        assert!(cli.tracks.is_none());
+    }
+
+    #[test]
+    fn cli_accepts_tracks_only() {
+        let cli = Cli::try_parse_from(["cytui", "--tracks", "tracks"]).unwrap();
+        assert!(cli.images.is_none());
+        assert!(cli.tracks.is_some());
+    }
+
+    #[test]
+    fn cli_accepts_images_and_tracks() {
+        let cli =
+            Cli::try_parse_from(["cytui", "--images", "images", "--tracks", "tracks"]).unwrap();
+        assert!(cli.images.is_some());
+        assert!(cli.tracks.is_some());
+    }
+
+    #[test]
+    fn cli_rejects_missing_input() {
+        assert!(Cli::try_parse_from(["cytui"]).is_err());
+    }
 }
 
 fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
